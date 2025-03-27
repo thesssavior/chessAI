@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Chess } from 'chess.js';
-import { ChessBoard } from '@/components/ChessBoard';
+import { PlayableChessBoard } from '@/components/PlayableChessBoard';
 import { BoardControls } from '@/components/BoardControls';
 import { PGNInput } from '@/components/PGNInput';
 import { GameInfo } from '@/components/GameInfo';
 import { AnalysisTabs } from '@/components/AnalysisTabs';
+import { GameImporter } from '@/components/GameImporter';
 import { parsePgn, getGameHistory, navigateToPosition, generateGameId } from '@/lib/chessUtils';
 import { GameState, GameMetadata } from '@shared/types';
 import { apiRequest } from '@/lib/queryClient';
@@ -108,6 +109,21 @@ export default function Home() {
     setGameState(prevState => navigateToPosition(prevState, index));
   };
 
+  // Handle moves made on the board
+  const handleMove = (newGameState: GameState) => {
+    // Update the game state with the new move
+    setGameState(newGameState);
+  };
+  
+  // Handle game imported from GameImporter
+  const handleGameLoaded = (newGameState: GameState) => {
+    setGameState(newGameState);
+    
+    // Generate a new game ID for the imported game
+    const newGameId = generateGameId();
+    setGameId(newGameId);
+  };
+
   return (
     <div className="container mx-auto px-4 py-6 min-h-screen">
       {/* Header */}
@@ -115,16 +131,17 @@ export default function Home() {
         <h1 className="text-2xl md:text-3xl font-bold text-neutral-400 mb-4 md:mb-0">
           Chess Moves Explainer AI
         </h1>
-        <PGNInput onSubmit={handlePgnSubmit} />
       </header>
       
       <main className="flex flex-col lg:flex-row gap-6">
         {/* Left panel - Chess board and controls */}
         <div className="w-full lg:w-1/2">
           <div className="mb-6">
-            <ChessBoard
+            <PlayableChessBoard
               gameState={gameState}
               boardOrientation={boardOrientation}
+              onMove={handleMove}
+              allowMoves={true}
             />
           </div>
           
@@ -136,6 +153,10 @@ export default function Home() {
             onLastMove={handleLastMove}
             onFlipBoard={handleFlipBoard}
           />
+          
+          <div className="mt-4 mb-4">
+            <GameImporter onGameLoaded={handleGameLoaded} />
+          </div>
           
           <GameInfo metadata={gameState.metadata} />
         </div>

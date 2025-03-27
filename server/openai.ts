@@ -59,8 +59,19 @@ export async function analyzePosition(request: AnalysisRequest): Promise<Analysi
     };
   } catch (error) {
     console.error("OpenAI API error:", error);
+    let errorMessage = "Sorry, I couldn't analyze this position. Please try again later.";
+    
+    // Check for rate limit or quota errors
+    if (error && typeof error === 'object') {
+      if ('status' in error && error.status === 429) {
+        errorMessage = "Rate limit exceeded for the OpenAI API. Either wait a minute and try again, or check your OpenAI account quota.";
+      } else if ('code' in error && error.code === 'insufficient_quota') {
+        errorMessage = "Your OpenAI API key has insufficient quota. Please check your billing details in your OpenAI account.";
+      }
+    }
+    
     return {
-      analysis: "Sorry, I couldn't analyze this position. Please try again later.",
+      analysis: errorMessage,
       suggestedMoves: []
     };
   }

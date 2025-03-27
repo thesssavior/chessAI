@@ -136,6 +136,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // API route for analyzing a position with engine evaluation
+  app.post("/api/analyze-with-engine", async (req, res) => {
+    try {
+      const schema = z.object({
+        fen: z.string(),
+        pgn: z.string(),
+        currentMoveNumber: z.number(),
+        engineEvaluation: z.object({
+          score: z.string(),
+          bestMove: z.string(),
+          bestLine: z.string().optional(),
+          depth: z.number()
+        })
+      });
+
+      const validatedData = schema.parse(req.body);
+      const analysis = await analyzePosition(validatedData);
+      
+      res.json(analysis);
+    } catch (error) {
+      console.error("Engine analysis error:", error);
+      res.status(400).json({ 
+        message: error instanceof Error ? error.message : "Invalid request" 
+      });
+    }
+  });
+
   // API route for saving a game
   app.post("/api/games", async (req, res) => {
     try {
