@@ -42,7 +42,7 @@ export function MoveList({ history, currentMoveIndex, onMoveClick, result }: Mov
                   {move.white && (
                     <button
                       className={`hover:bg-neutral-100 px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-primary ${
-                        currentMoveIndex === idx * 2 ? 'bg-primary bg-opacity-10' : ''
+                        currentMoveIndex === idx * 2 ? 'bg-blue-100 text-blue-800 font-medium' : 'text-neutral-800'
                       }`}
                       onClick={() => onMoveClick(idx * 2)}
                     >
@@ -54,7 +54,7 @@ export function MoveList({ history, currentMoveIndex, onMoveClick, result }: Mov
                   {move.black && (
                     <button
                       className={`hover:bg-neutral-100 px-2 py-1 rounded focus:outline-none focus:ring-1 focus:ring-primary ${
-                        currentMoveIndex === idx * 2 + 1 ? 'bg-primary bg-opacity-10' : ''
+                        currentMoveIndex === idx * 2 + 1 ? 'bg-blue-100 text-blue-800 font-medium' : 'text-neutral-800'
                       }`}
                       onClick={() => onMoveClick(idx * 2 + 1)}
                     >

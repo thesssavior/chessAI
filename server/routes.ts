@@ -13,14 +13,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { username, gameUrl } = req.query;
       
       if (gameUrl) {
-        // Extract game ID from URL
-        const gameIdMatch = String(gameUrl).match(/\/(\d+)$/);
-        if (!gameIdMatch) {
-          return res.status(400).json({ message: "Invalid Chess.com game URL" });
+        // Extract game ID from URL - now support multiple URL formats
+        let gameId = '';
+        const urlString = String(gameUrl);
+        
+        // Handle different chess.com URL formats
+        if (urlString.includes('/live/game/')) {
+          const liveMatch = urlString.match(/\/live\/game\/(\d+)/);
+          if (liveMatch) gameId = liveMatch[1];
+        } else if (urlString.includes('/game/live/')) {
+          const liveMatch = urlString.match(/\/game\/live\/(\d+)/);
+          if (liveMatch) gameId = liveMatch[1];
+        } else if (urlString.includes('/daily/game/')) {
+          const dailyMatch = urlString.match(/\/daily\/game\/(\d+)/);
+          if (dailyMatch) gameId = dailyMatch[1];
+        } else if (urlString.includes('/game/daily/')) {
+          const dailyMatch = urlString.match(/\/game\/daily\/(\d+)/);
+          if (dailyMatch) gameId = dailyMatch[1];
+        } else {
+          // Fallback to the simple pattern
+          const simpleMatch = urlString.match(/\/(\d+)$/);
+          if (simpleMatch) gameId = simpleMatch[1];
         }
         
-        const gameId = gameIdMatch[1];
-        const response = await fetch(`https://www.chess.com/callback/game/live/export/pgn/${gameId}`);
+        if (!gameId) {
+          return res.status(400).json({ message: "Invalid Chess.com game URL. Please use a URL from a game page on chess.com" });
+        }
+        
+        console.log(`Attempting to fetch Chess.com game with ID: ${gameId}`);
+        
+        // Try both the live and daily endpoints
+        let response = await fetch(`https://www.chess.com/callback/game/live/export/pgn/${gameId}`);
+        
+        // If the live endpoint failed, try the daily endpoint
+        if (!response.ok) {
+          response = await fetch(`https://www.chess.com/callback/game/daily/export/pgn/${gameId}`);
+        }
         
         if (!response.ok) {
           return res.status(404).json({ message: "Game not found on Chess.com" });
@@ -56,9 +84,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ message: "No games found for user in the latest month" });
         }
         
-        // Return the most recent game's PGN
-        const latestGame = games.games[games.games.length - 1];
-        const pgn = latestGame.pgn;
+        // Find the latest game with a valid PGN
+        let pgn = null;
+        
+        // Go through the games in reverse to find the most recent game with a valid PGN
+        for (let i = games.games.length - 1; i >= 0; i--) {
+          const game = games.games[i];
+          if (game.pgn && game.pgn.trim().length > 0) {
+            pgn = game.pgn;
+            break;
+          }
+        }
+        
+        if (!pgn) {
+          return res.status(404).json({ message: "No valid PGN found in user's recent games" });
+        }
         
         res.json({ pgn });
       } else {
