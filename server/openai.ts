@@ -6,7 +6,7 @@ const MODEL = "gpt-4o";
 
 // Initialize OpenAI client
 const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || "placeholder-key" 
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 // Create a detailed analysis of the current chess position
@@ -67,7 +67,45 @@ export async function analyzePosition(request: AnalysisRequest): Promise<Analysi
         errorMessage = "Rate limit exceeded for the OpenAI API. Either wait a minute and try again, or check your OpenAI account quota.";
       } else if ('code' in error && error.code === 'insufficient_quota') {
         errorMessage = "Your OpenAI API key has insufficient quota. Please check your billing details in your OpenAI account.";
+      } else if (!process.env.OPENAI_API_KEY) {
+        errorMessage = "OpenAI API key is missing. Please provide a valid API key in the environment variables.";
       }
+    }
+    
+    // Add an alternative analysis using Stockfish evaluation if available
+    if (request.engineEvaluation) {
+      const { score, bestMove, bestLine, depth } = request.engineEvaluation;
+      let engineAnalysis = "\n\n**Stockfish Engine Analysis (Depth " + depth + "):**\n\n";
+      
+      // Format the score for human readability
+      if (score.includes('#')) {
+        // It's a mate score
+        const mateNumber = parseInt(score.replace('#', ''));
+        const side = mateNumber > 0 ? "White" : "Black";
+        engineAnalysis += `Mate in ${Math.abs(mateNumber)} for ${side}\n`;
+      } else {
+        // It's a centipawn score
+        const cpScore = parseFloat(score) / 100; // Convert centipawns to pawns
+        if (cpScore > 0) {
+          engineAnalysis += `White is ahead by ${cpScore.toFixed(2)} pawns\n`;
+        } else if (cpScore < 0) {
+          engineAnalysis += `Black is ahead by ${Math.abs(cpScore).toFixed(2)} pawns\n`;
+        } else {
+          engineAnalysis += "The position is equal\n";
+        }
+      }
+      
+      // Add best move information
+      if (bestMove) {
+        engineAnalysis += `Best move: ${bestMove}\n`;
+      }
+      
+      // Add the suggested line if available
+      if (bestLine && bestLine.length > 0) {
+        engineAnalysis += `Best line: ${bestLine}\n`;
+      }
+      
+      errorMessage += engineAnalysis;
     }
     
     return {

@@ -42,17 +42,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         console.log(`Attempting to fetch Chess.com game with ID: ${gameId}`);
         
-        // Try both the live and daily endpoints
-        let response = await fetch(`https://www.chess.com/callback/game/live/export/pgn/${gameId}`);
+        // Try multiple Chess.com API endpoints
+        const endpoints = [
+          `https://www.chess.com/callback/game/live/export/pgn/${gameId}`,
+          `https://www.chess.com/callback/game/daily/export/pgn/${gameId}`,
+          `https://www.chess.com/callback/games/archive/live/download/${gameId}`,
+          `https://www.chess.com/callback/games/archive/daily/download/${gameId}`
+        ];
         
-        // If the live endpoint failed, try the daily endpoint
-        if (!response.ok) {
-          response = await fetch(`https://www.chess.com/callback/game/daily/export/pgn/${gameId}`);
+        let response = null;
+        let successEndpoint = '';
+        
+        // Try each endpoint until we find one that works
+        for (const endpoint of endpoints) {
+          console.log(`Trying endpoint: ${endpoint}`);
+          const tempResponse = await fetch(endpoint);
+          if (tempResponse.ok) {
+            response = tempResponse;
+            successEndpoint = endpoint;
+            console.log(`Found working endpoint: ${endpoint}`);
+            break;
+          }
         }
         
-        if (!response.ok) {
-          return res.status(404).json({ message: "Game not found on Chess.com" });
+        if (!response || !response.ok) {
+          console.log('All Chess.com endpoints failed');
+          return res.status(404).json({ message: "Game not found on Chess.com. Check your URL and try again." });
         }
+        
+        console.log(`Successfully fetched game from: ${successEndpoint}`);
         
         const pgn = await response.text();
         res.json({ pgn });

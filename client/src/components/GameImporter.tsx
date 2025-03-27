@@ -31,11 +31,24 @@ export function GameImporter({ onGameLoaded }: GameImporterProps) {
         params = { username: chesscomUsername };
       } else if (chesscomGameUrl) {
         // Get a specific game by URL
-        params = { gameUrl: chesscomGameUrl };
+        let gameUrl = chesscomGameUrl;
+        
+        // Ensure the URL starts with https:// if not already
+        if (!gameUrl.startsWith('http://') && !gameUrl.startsWith('https://')) {
+          gameUrl = 'https://' + gameUrl;
+        }
+        
+        // Make sure the URL is from chess.com
+        if (!gameUrl.includes('chess.com')) {
+          throw new Error('Please enter a valid Chess.com game URL');
+        }
+        
+        params = { gameUrl };
       } else {
         throw new Error('Please enter a Chess.com username or game URL');
       }
       
+      console.log('Importing from Chess.com with params:', params);
       const response = await apiRequest('GET', `${endpoint}?${new URLSearchParams(params)}`);
       const data = await response.json();
       

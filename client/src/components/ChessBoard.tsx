@@ -10,7 +10,7 @@ interface ChessBoardProps {
 export function ChessBoard({ gameState, boardOrientation }: ChessBoardProps) {
   const [lastMove, setLastMove] = useState<[string, string] | null>(null);
 
-  // Update last move highlight whenever the currentMoveIndex changes
+  // Update last move highlight whenever the gameState changes
   useEffect(() => {
     if (gameState.history.length === 0 || gameState.currentMoveIndex < 0) {
       setLastMove(null);
@@ -23,7 +23,7 @@ export function ChessBoard({ gameState, boardOrientation }: ChessBoardProps) {
     } else {
       setLastMove(null);
     }
-  }, [gameState.currentMoveIndex, gameState.history]);
+  }, [gameState]);
 
   // Custom style for the chess board
   const customSquareStyles: Record<string, React.CSSProperties> = {};
