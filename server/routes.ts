@@ -7,6 +7,113 @@ import { insertChatSchema, insertGameSchema } from "@shared/schema";
 import { ChatMessage } from "@shared/types";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // API route for importing a game from Chess.com
+  app.get("/api/import/chessdotcom", async (req, res) => {
+    try {
+      const { username, gameUrl } = req.query;
+      
+      if (gameUrl) {
+        // Extract game ID from URL
+        const gameIdMatch = String(gameUrl).match(/\/(\d+)$/);
+        if (!gameIdMatch) {
+          return res.status(400).json({ message: "Invalid Chess.com game URL" });
+        }
+        
+        const gameId = gameIdMatch[1];
+        const response = await fetch(`https://www.chess.com/callback/game/live/export/pgn/${gameId}`);
+        
+        if (!response.ok) {
+          return res.status(404).json({ message: "Game not found on Chess.com" });
+        }
+        
+        const pgn = await response.text();
+        res.json({ pgn });
+      } else if (username) {
+        // Fetch recent games for a user
+        const response = await fetch(`https://api.chess.com/pub/player/${username}/games/archives`);
+        
+        if (!response.ok) {
+          return res.status(404).json({ message: "User not found on Chess.com" });
+        }
+        
+        const archives = await response.json();
+        
+        if (!archives.archives || archives.archives.length === 0) {
+          return res.status(404).json({ message: "No games found for user" });
+        }
+        
+        // Get the most recent month of games
+        const latestArchiveUrl = archives.archives[archives.archives.length - 1];
+        const gamesResponse = await fetch(latestArchiveUrl);
+        
+        if (!gamesResponse.ok) {
+          return res.status(500).json({ message: "Failed to fetch games from Chess.com" });
+        }
+        
+        const games = await gamesResponse.json();
+        
+        if (!games.games || games.games.length === 0) {
+          return res.status(404).json({ message: "No games found for user in the latest month" });
+        }
+        
+        // Return the most recent game's PGN
+        const latestGame = games.games[games.games.length - 1];
+        const pgn = latestGame.pgn;
+        
+        res.json({ pgn });
+      } else {
+        res.status(400).json({ message: "Missing username or game URL" });
+      }
+    } catch (error) {
+      console.error("Chess.com import error:", error);
+      res.status(500).json({ 
+        message: error instanceof Error ? error.message : "Failed to import from Chess.com" 
+      });
+    }
+  });
+  
+  // API route for importing a game from Lichess
+  app.get("/api/import/lichess", async (req, res) => {
+    try {
+      const { username, gameId } = req.query;
+      
+      if (gameId) {
+        // Fetch a specific game by ID
+        const response = await fetch(`https://lichess.org/game/export/${gameId}?pgnInJson=true`);
+        
+        if (!response.ok) {
+          return res.status(404).json({ message: "Game not found on Lichess" });
+        }
+        
+        const data = await response.json();
+        res.json({ pgn: data.pgn });
+      } else if (username) {
+        // Fetch recent games for a user
+        const response = await fetch(`https://lichess.org/api/games/user/${username}?max=1&pgnInJson=true`);
+        
+        if (!response.ok) {
+          return res.status(404).json({ message: "User not found on Lichess" });
+        }
+        
+        const games = await response.json();
+        
+        if (!games || games.length === 0) {
+          return res.status(404).json({ message: "No games found for user" });
+        }
+        
+        // Return the most recent game's PGN
+        const latestGame = games[0];
+        res.json({ pgn: latestGame.pgn });
+      } else {
+        res.status(400).json({ message: "Missing username or game ID" });
+      }
+    } catch (error) {
+      console.error("Lichess import error:", error);
+      res.status(500).json({ 
+        message: error instanceof Error ? error.message : "Failed to import from Lichess" 
+      });
+    }
+  });
   // API route for analyzing a chess position
   app.post("/api/analyze", async (req, res) => {
     try {

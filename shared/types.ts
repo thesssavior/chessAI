@@ -22,12 +22,21 @@ export interface ChessMove {
   captured?: string;
 }
 
+// Engine evaluation data
+export interface EngineEvaluation {
+  score: string;
+  bestMove: string;
+  bestLine?: string;
+  depth: number;
+}
+
 // Types for analysis requests
 export interface AnalysisRequest {
   fen: string;
   pgn: string;
   currentMoveNumber: number;
   question?: string;
+  engineEvaluation?: EngineEvaluation;
 }
 
 // Types for analysis responses
