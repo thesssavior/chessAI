@@ -12,6 +12,7 @@ export function ChessBoard({ gameState, boardOrientation }: ChessBoardProps) {
 
   // Update last move highlight whenever the gameState changes
   useEffect(() => {
+    console.log('Current FEN in ChessBoard:', gameState.fen); // Debug FEN
     if (gameState.history.length === 0 || gameState.currentMoveIndex < 0) {
       setLastMove(null);
       return;
@@ -49,6 +50,7 @@ export function ChessBoard({ gameState, boardOrientation }: ChessBoardProps) {
         areArrowsAllowed={false}
         customDarkSquareStyle={{ backgroundColor: '#769656' }}
         customLightSquareStyle={{ backgroundColor: '#EEEED2' }}
+        key={gameState.fen} 
       />
     </div>
   );

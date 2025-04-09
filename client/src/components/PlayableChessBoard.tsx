@@ -6,7 +6,7 @@ import { GameState, ChessMove } from '@shared/types';
 interface PlayableChessBoardProps {
   gameState: GameState;
   boardOrientation: 'white' | 'black';
-  onMove: (newGameState: GameState) => void;
+  onMove: (move: ChessMove, newFen: string) => void;
   allowMoves: boolean;
 }
 
@@ -16,7 +16,7 @@ export function PlayableChessBoard({
   onMove,
   allowMoves = true
 }: PlayableChessBoardProps) {
-  const [chess, setChess] = useState<Chess>(new Chess(gameState.fen));
+  const [chess, setChess] = useState<Chess>(new Chess());
   const [lastMove, setLastMove] = useState<[string, string] | null>(null);
 
   // Update the board position when the gameState changes
@@ -47,25 +47,21 @@ export function PlayableChessBoard({
 
   const onDrop = (sourceSquare: string, targetSquare: string) => {
     if (!allowMoves) return false;
-
-    // Clone the current chess instance
+    
     const newChess = new Chess(chess.fen());
     
     try {
-      // Try to make the move
       const moveOptions = {
         from: sourceSquare,
         to: targetSquare,
-        promotion: 'q', // Default to queen promotion
+        promotion: 'q',
       };
       
       const move = newChess.move(moveOptions);
       
       if (move) {
-        // Move is legal, update the chess state
         setChess(newChess);
         
-        // Format move history for our app state
         const newMove: ChessMove = {
           color: move.color,
           piece: move.piece,
@@ -74,26 +70,13 @@ export function PlayableChessBoard({
           san: move.san,
           flags: move.flags,
           promotion: move.promotion,
-          captured: move.captured
+          captured: move.captured,
         };
         
-        // Add the new move to history
-        const newHistory = [...gameState.history, newMove];
-        
-        // Update the game state
-        const newGameState: GameState = {
-          ...gameState,
-          fen: newChess.fen(),
-          history: newHistory,
-          currentMoveIndex: newHistory.length - 1,
-          pgn: newChess.pgn()
-        };
-        
-        // Set lastMove for highlighting
         setLastMove([sourceSquare, targetSquare]);
         
-        // Notify parent component
-        onMove(newGameState);
+        // Notify parent with move and new FEN
+        onMove(newMove, newChess.fen());
         
         return true;
       }
@@ -103,7 +86,7 @@ export function PlayableChessBoard({
     
     return false;
   };
-
+  
   // Custom style for the chess board
   const customSquareStyles: Record<string, React.CSSProperties> = {};
   

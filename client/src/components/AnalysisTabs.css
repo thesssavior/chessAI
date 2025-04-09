@@ -1,0 +1,49 @@
+.detailed-evaluation {
+  background-color: #2e3440;
+  border-radius: 8px;
+  max-width: 100%;
+  overflow-x: hidden;
+  color: #eceff4;
+}
+
+.metric-item,
+.comparative-metric {
+  margin-bottom: 12px;
+}
+
+.eval-header {
+  border-bottom: 1px solid #3b4252;
+  margin-bottom: 16px;
+}
+
+/* Ensuring proper sizing for the progress bars */
+.h-2 {
+  height: 8px;
+}
+
+/* Add a subtle animation for loading state */
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-spinner {
+  border: 3px solid #434c5e;
+  border-radius: 50%;
+  border-top: 3px solid #88c0d0;
+  width: 24px;
+  height: 24px;
+  animation: rotate 1s linear infinite;
+  margin: 20px auto;
+}
+
+.error {
+  color: #bf616a;
+  padding: 10px;
+  border-left: 3px solid #bf616a;
+  background-color: rgba(191, 97, 106, 0.1);
+} 

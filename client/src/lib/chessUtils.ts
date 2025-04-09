@@ -41,22 +41,34 @@ export function navigateToPosition(gameState: GameState, moveIndex: number): Gam
   const chess = new Chess();
   chess.loadPgn(gameState.pgn);
   
-  // Clear all moves
-  while (chess.undo() !== null) {} 
+  // If we're at the starting position (moveIndex === -1), we're done
+  if (moveIndex === -1) {
+    return {
+      ...gameState,
+      fen: chess.fen(),
+      currentMoveIndex: -1
+    };
+  }
   
-  // Play moves up to the desired index
-  const movesToPlay = Math.max(0, Math.min(moveIndex, gameState.history.length - 1)) + 1;
-  const history = getGameHistory(chess);
+  // Get all moves from the original game
+  const moves = gameState.history;
+  const targetMove = moves[moveIndex];
   
-  // Reset chess and replay the moves
+  if (!targetMove) {
+    console.error(`Invalid move index: ${moveIndex}`);
+    return gameState;
+  }
+  
+  // Reset and replay moves up to the target
   chess.reset();
-  for (let i = 0; i < movesToPlay; i++) {
-    if (i < history.length) {
+  for (let i = 0; i <= moveIndex; i++) {
+    const move = moves[i];
+    if (move) {
       try {
         chess.move({
-          from: history[i].from,
-          to: history[i].to,
-          promotion: history[i].promotion
+          from: move.from,
+          to: move.to,
+          promotion: move.promotion
         });
       } catch (e) {
         console.error(`Failed to replay move: ${i}`, e);
@@ -68,16 +80,15 @@ export function navigateToPosition(gameState: GameState, moveIndex: number): Gam
   return {
     ...gameState,
     fen: chess.fen(),
-    currentMoveIndex: moveIndex
+    currentMoveIndex: moveIndex,
+    history: moves // Ensure we maintain the original history
   };
 }
 
 // Get the current move number and side to move
 export function getCurrentMoveDisplay(gameState: GameState): string {
-  // In chess, each complete move consists of white+black moving
-  // So move 1 is after both white and black moved once
   const fullMoveNumber = Math.floor(gameState.currentMoveIndex / 2) + 1;
-  const side = gameState.currentMoveIndex % 2 === 0 ? "White" : "Black";
+  const side = gameState.currentMoveIndex % 2 === 0 ? "Black" : "White";
   const totalMoves = Math.ceil(gameState.history.length / 2);
   
   return `Move ${fullMoveNumber} (${side} to move) of ${totalMoves}`;

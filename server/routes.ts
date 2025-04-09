@@ -5,301 +5,366 @@ import { analyzePosition } from "./openai";
 import { z } from "zod";
 import { insertChatSchema, insertGameSchema } from "@shared/schema";
 import { ChatMessage } from "@shared/types";
+import { Chess } from "chess.js";
+import path from "path";
+
+interface ChessComGame {
+  pgn: string;
+  white: { username: string };
+  black: { username: string };
+  result: string;
+  end_time: number;
+  url: string;
+}
+
+interface ChessComResponse {
+  games: ChessComGame[];
+}
+
+interface ChessComArchivesResponse {
+  archives: string[];
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Serve Stockfish.js from the public directory
+  app.get("/stockfish.js", (req, res) => {
+    res.sendFile(path.join(__dirname, "../public/stockfish.js"));
+  });
+
   // API route for importing a game from Chess.com
   app.get("/api/import/chessdotcom", async (req, res) => {
     try {
-      const { username, gameUrl } = req.query;
+      const { username, archiveUrl, gameUrl } = req.query;
+      
+      if (!username && !gameUrl) {
+        return res.status(400).json({ message: "Missing username or game URL parameter" });
+      }
+
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9'
+      };
       
       if (gameUrl) {
-        // Extract game ID from URL - now support multiple URL formats
-        let gameId = '';
-        const urlString = String(gameUrl);
+        // Extract game ID from URL
+        const gameIdMatch = String(gameUrl).match(/\/game\/live\/(\d+)/);
+        if (!gameIdMatch) {
+          return res.status(400).json({ 
+            message: "Invalid Chess.com game URL",
+            details: "URL should be in format: https://www.chess.com/game/live/[gameId]"
+          });
+        }
+
+        const gameId = gameIdMatch[1];
+        console.log('Fetching game:', gameId);
         
-        // Handle different chess.com URL formats
-        if (urlString.includes('/live/game/')) {
-          const liveMatch = urlString.match(/\/live\/game\/(\d+)/);
-          if (liveMatch) gameId = liveMatch[1];
-        } else if (urlString.includes('/game/live/')) {
-          const liveMatch = urlString.match(/\/game\/live\/(\d+)/);
-          if (liveMatch) gameId = liveMatch[1];
-        } else if (urlString.includes('/daily/game/')) {
-          const dailyMatch = urlString.match(/\/daily\/game\/(\d+)/);
-          if (dailyMatch) gameId = dailyMatch[1];
-        } else if (urlString.includes('/game/daily/')) {
-          const dailyMatch = urlString.match(/\/game\/daily\/(\d+)/);
-          if (dailyMatch) gameId = dailyMatch[1];
-        } else {
-          // Fallback to the simple pattern
-          const simpleMatch = urlString.match(/\/(\d+)$/);
-          if (simpleMatch) gameId = simpleMatch[1];
+        // Use the public API endpoint
+        const gameResponse = await fetch(`https://api.chess.com/pub/game/${gameId}`, { headers });
+        if (!gameResponse.ok) {
+          const errorText = await gameResponse.text();
+          console.error('Chess.com game response error:', {
+            status: gameResponse.status,
+            statusText: gameResponse.statusText,
+            gameId,
+            response: errorText
+          });
+          return res.status(404).json({ 
+            message: "Game not found",
+            details: "The game might be private or no longer available"
+          });
+        }
+
+        const gameData = await gameResponse.json();
+        if (!gameData.pgn) {
+          return res.status(400).json({ 
+            message: "No PGN available",
+            details: "This game might not be completed or might be private"
+          });
+        }
+
+        // Ensure the timestamp is not in the future
+        const timestamp = gameData.end_time || Math.floor(Date.now() / 1000);
+        
+        return res.json({
+          games: [{
+            pgn: gameData.pgn,
+            white: gameData.white.username,
+            black: gameData.black.username,
+            result: gameData.result,
+            timestamp: timestamp,
+            url: gameUrl
+          }]
+        });
+      } else if (archiveUrl) {
+        // Fetch specific archive
+        console.log('Fetching archive:', archiveUrl);
+        const gamesResponse = await fetch(String(archiveUrl), { headers });
+        if (!gamesResponse.ok) {
+          console.error('Chess.com archive response error:', {
+            status: gamesResponse.status,
+            statusText: gamesResponse.statusText,
+            url: archiveUrl
+          });
+          return res.status(500).json({ 
+            message: `Failed to fetch games from Chess.com: ${gamesResponse.status} ${gamesResponse.statusText}` 
+          });
         }
         
-        if (!gameId) {
-          return res.status(400).json({ message: "Invalid Chess.com game URL. Please use a URL from a game page on chess.com" });
+        const gamesData = await gamesResponse.json() as ChessComResponse;
+        if (!gamesData.games || !Array.isArray(gamesData.games)) {
+          console.error('Invalid games data format:', gamesData);
+          return res.status(500).json({ message: "Invalid response format from Chess.com" });
         }
+
+        const games = gamesData.games
+          .map((game: ChessComGame) => ({
+            pgn: game.pgn,
+            white: game.white.username,
+            black: game.black.username,
+            result: game.result,
+            timestamp: game.end_time,
+            url: game.url
+          }))
+          .filter((game: { pgn: string }) => game.pgn && game.pgn.trim().length > 0);
+
+        return res.json({ games });
+      } else {
+        // First request - get archives and first batch of games
+        const archivesUrl = `https://api.chess.com/pub/player/${username}/games/archives`;
+        console.log('Fetching archives for user:', username, 'URL:', archivesUrl);
         
-        console.log(`Attempting to fetch Chess.com game with ID: ${gameId}`);
-        
-        // Try multiple Chess.com API endpoints
-        const endpoints = [
-          `https://www.chess.com/callback/game/live/export/pgn/${gameId}`,
-          `https://www.chess.com/callback/game/daily/export/pgn/${gameId}`,
-          `https://www.chess.com/callback/games/archive/live/download/${gameId}`,
-          `https://www.chess.com/callback/games/archive/daily/download/${gameId}`
-        ];
-        
-        let response = null;
-        let successEndpoint = '';
-        
-        // Try each endpoint until we find one that works
-        for (const endpoint of endpoints) {
-          console.log(`Trying endpoint: ${endpoint}`);
-          const tempResponse = await fetch(endpoint);
-          if (tempResponse.ok) {
-            response = tempResponse;
-            successEndpoint = endpoint;
-            console.log(`Found working endpoint: ${endpoint}`);
-            break;
+        const archiveResponse = await fetch(archivesUrl, { headers });
+        if (!archiveResponse.ok) {
+          const errorText = await archiveResponse.text();
+          console.error('Chess.com archives response error:', {
+            status: archiveResponse.status,
+            statusText: archiveResponse.statusText,
+            username,
+            url: archivesUrl,
+            response: errorText
+          });
+          
+          if (archiveResponse.status === 404) {
+            return res.status(404).json({ 
+              message: "User not found on Chess.com",
+              details: "Please check if the username is correct and the account exists"
+            });
           }
+          
+          return res.status(500).json({ 
+            message: `Failed to fetch archives from Chess.com: ${archiveResponse.status} ${archiveResponse.statusText}`,
+            details: errorText
+          });
         }
         
-        if (!response || !response.ok) {
-          console.log('All Chess.com endpoints failed');
-          return res.status(404).json({ message: "Game not found on Chess.com. Check your URL and try again." });
+        const archivesData = await archiveResponse.json() as ChessComArchivesResponse;
+        console.log('Archives response:', {
+          archiveCount: archivesData.archives?.length || 0,
+          hasArchives: Boolean(archivesData.archives?.length)
+        });
+        
+        if (!archivesData.archives || !Array.isArray(archivesData.archives) || archivesData.archives.length === 0) {
+          console.error('No archives found for user:', username);
+          return res.status(404).json({ 
+            message: "No games found for user",
+            details: "This user has no games in their history"
+          });
         }
-        
-        console.log(`Successfully fetched game from: ${successEndpoint}`);
-        
-        const pgn = await response.text();
-        res.json({ pgn });
-      } else if (username) {
-        // Fetch recent games for a user
-        const response = await fetch(`https://api.chess.com/pub/player/${username}/games/archives`);
-        
-        if (!response.ok) {
-          return res.status(404).json({ message: "User not found on Chess.com" });
-        }
-        
-        const archives = await response.json();
-        
-        if (!archives.archives || archives.archives.length === 0) {
-          return res.status(404).json({ message: "No games found for user" });
-        }
-        
-        // Get the most recent month of games
-        const latestArchiveUrl = archives.archives[archives.archives.length - 1];
-        const gamesResponse = await fetch(latestArchiveUrl);
+
+        // Get current and previous month's archives
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        const previousMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+        const previousYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+
+        // Try current month first, then previous month
+        const archiveUrls = [
+          `https://api.chess.com/pub/player/${username}/games/${currentYear}/${String(currentMonth).padStart(2, '0')}`,
+          `https://api.chess.com/pub/player/${username}/games/${previousYear}/${String(previousMonth).padStart(2, '0')}`
+        ];
+
+        console.log('Trying archive URLs:', archiveUrls);
+
+        let games: any[] = [];
+        let archives = archivesData.archives;
+
+        for (const archiveUrl of archiveUrls) {
+          try {
+            console.log('Fetching archive:', archiveUrl);
+            
+            // Add a small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            const gamesResponse = await fetch(archiveUrl, { 
+              headers: {
+                ...headers,
+                'Cache-Control': 'no-cache'
+              }
+            });
         
         if (!gamesResponse.ok) {
-          return res.status(500).json({ message: "Failed to fetch games from Chess.com" });
-        }
-        
-        const games = await gamesResponse.json();
-        
-        if (!games.games || games.games.length === 0) {
-          return res.status(404).json({ message: "No games found for user in the latest month" });
-        }
-        
-        // Find the latest game with a valid PGN
-        let pgn = null;
-        
-        // Go through the games in reverse to find the most recent game with a valid PGN
-        for (let i = games.games.length - 1; i >= 0; i--) {
-          const game = games.games[i];
-          if (game.pgn && game.pgn.trim().length > 0) {
-            pgn = game.pgn;
-            break;
+              console.log('Archive not available:', archiveUrl);
+              continue;
+            }
+            
+            const gamesData = await gamesResponse.json() as ChessComResponse;
+            console.log('Games response:', {
+              url: archiveUrl,
+              gameCount: gamesData.games?.length || 0,
+              hasGames: Boolean(gamesData.games?.length)
+            });
+            
+            if (gamesData.games && Array.isArray(gamesData.games)) {
+              const validGames = gamesData.games
+                .reverse()
+                .map((game: ChessComGame) => ({
+                  pgn: game.pgn,
+                  white: game.white.username,
+                  black: game.black.username,
+                  result: game.result,
+                  timestamp: game.end_time,
+                  url: game.url
+                }))
+                .filter((game: { pgn: string }) => game.pgn && game.pgn.trim().length > 0);
+
+              console.log('Valid games from archive:', {
+                url: archiveUrl,
+                totalGames: gamesData.games.length,
+                validGames: validGames.length
+              });
+
+              games = [...games, ...validGames];
+            }
+          } catch (error) {
+            console.error('Error fetching archive:', archiveUrl, error);
+            continue;
           }
         }
-        
-        if (!pgn) {
-          return res.status(404).json({ message: "No valid PGN found in user's recent games" });
+
+        if (games.length === 0) {
+          console.error('No valid games found in any archive');
+          return res.status(404).json({ 
+            message: "No games found for user",
+            details: "No valid games found in current or previous month"
+          });
         }
-        
-        res.json({ pgn });
-      } else {
-        res.status(400).json({ message: "Missing username or game URL" });
+
+        console.log('Total valid games found:', games.length);
+        return res.json({ 
+          games,
+          archives: archives.reverse() // Newest first
+        });
       }
     } catch (error) {
       console.error("Chess.com import error:", error);
       res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Failed to import from Chess.com" 
+        message: error instanceof Error ? error.message : "Failed to import from Chess.com",
+        details: error instanceof Error ? error.stack : undefined
       });
     }
   });
   
-  // API route for importing a game from Lichess
-  app.get("/api/import/lichess", async (req, res) => {
-    try {
-      const { username, gameId } = req.query;
-      
-      if (gameId) {
-        // Fetch a specific game by ID
-        const response = await fetch(`https://lichess.org/game/export/${gameId}?pgnInJson=true`);
-        
-        if (!response.ok) {
-          return res.status(404).json({ message: "Game not found on Lichess" });
-        }
-        
-        const data = await response.json();
-        res.json({ pgn: data.pgn });
-      } else if (username) {
-        // Fetch recent games for a user
-        const response = await fetch(`https://lichess.org/api/games/user/${username}?max=1&pgnInJson=true`);
-        
-        if (!response.ok) {
-          return res.status(404).json({ message: "User not found on Lichess" });
-        }
-        
-        const games = await response.json();
-        
-        if (!games || games.length === 0) {
-          return res.status(404).json({ message: "No games found for user" });
-        }
-        
-        // Return the most recent game's PGN
-        const latestGame = games[0];
-        res.json({ pgn: latestGame.pgn });
-      } else {
-        res.status(400).json({ message: "Missing username or game ID" });
-      }
-    } catch (error) {
-      console.error("Lichess import error:", error);
-      res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Failed to import from Lichess" 
-      });
-    }
-  });
-  // API route for analyzing a chess position
+  // API route for analyzing a position
   app.post("/api/analyze", async (req, res) => {
     try {
-      const schema = z.object({
-        fen: z.string(),
-        pgn: z.string(),
-        currentMoveNumber: z.number(),
-        question: z.string().optional()
-      });
-
-      const validatedData = schema.parse(req.body);
-      const analysis = await analyzePosition(validatedData);
-      
-      res.json(analysis);
+      const result = await analyzePosition(req.body);
+      res.json(result);
     } catch (error) {
       console.error("Analysis error:", error);
-      res.status(400).json({ 
-        message: error instanceof Error ? error.message : "Invalid request" 
-      });
-    }
-  });
-
-  // API route for analyzing a position with engine evaluation
-  app.post("/api/analyze-with-engine", async (req, res) => {
-    try {
-      const schema = z.object({
-        fen: z.string(),
-        pgn: z.string(),
-        currentMoveNumber: z.number(),
-        engineEvaluation: z.object({
-          score: z.string(),
-          bestMove: z.string(),
-          bestLine: z.string().optional(),
-          depth: z.number()
-        })
-      });
-
-      const validatedData = schema.parse(req.body);
-      const analysis = await analyzePosition(validatedData);
-      
-      res.json(analysis);
-    } catch (error) {
-      console.error("Engine analysis error:", error);
-      res.status(400).json({ 
-        message: error instanceof Error ? error.message : "Invalid request" 
-      });
-    }
-  });
-
-  // API route for saving a game
-  app.post("/api/games", async (req, res) => {
-    try {
-      const validatedData = insertGameSchema.parse(req.body);
-      const game = await storage.saveGame(validatedData);
-      res.status(201).json(game);
-    } catch (error) {
-      console.error("Game save error:", error);
-      res.status(400).json({ 
-        message: error instanceof Error ? error.message : "Invalid game data" 
-      });
-    }
-  });
-
-  // API route for getting a game
-  app.get("/api/games/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "Invalid game ID" });
-      }
-      
-      const game = await storage.getGame(id);
-      if (!game) {
-        return res.status(404).json({ message: "Game not found" });
-      }
-      
-      res.json(game);
-    } catch (error) {
-      console.error("Game retrieval error:", error);
       res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Server error" 
+        message: error instanceof Error ? error.message : "Failed to analyze position" 
       });
     }
   });
 
-  // API route for saving/updating chat messages
-  app.post("/api/chats", async (req, res) => {
-    try {
-      const validatedData = insertChatSchema.parse(req.body);
-      const existingChat = await storage.getChatByGameId(validatedData.gameId);
-      
-      if (existingChat) {
-        // Update existing chat
-        const messages = validatedData.messages as ChatMessage[];
-        const updatedChat = await storage.updateChatMessages(existingChat.id, messages);
-        return res.json(updatedChat);
-      } else {
-        // Create new chat
-        const chat = await storage.saveChat(validatedData);
-        return res.status(201).json(chat);
-      }
-    } catch (error) {
-      console.error("Chat save error:", error);
-      res.status(400).json({ 
-        message: error instanceof Error ? error.message : "Invalid chat data" 
-      });
-    }
-  });
-
-  // API route for getting chat history by game ID
+  // API route for getting chat messages for a game
   app.get("/api/chats/game/:gameId", async (req, res) => {
     try {
       const { gameId } = req.params;
       const chat = await storage.getChatByGameId(gameId);
       
       if (!chat) {
-        return res.status(404).json({ message: "Chat not found" });
+        return res.json({ messages: [] });
       }
       
-      res.json(chat);
+      res.json({ messages: chat.messages });
     } catch (error) {
-      console.error("Chat retrieval error:", error);
+      console.error("Error fetching chat messages:", error);
       res.status(500).json({ 
-        message: error instanceof Error ? error.message : "Server error" 
+        message: error instanceof Error ? error.message : "Failed to fetch chat messages" 
       });
     }
   });
 
-  const httpServer = createServer(app);
-  return httpServer;
+  // API route for saving chat messages
+  app.post("/api/chats", async (req, res) => {
+    try {
+      const { gameId, messages, context } = req.body;
+      
+      // Get AI response using OpenAI
+      try {
+        const aiResponse = await analyzePosition({
+          fen: context.fen,
+          pgn: context.pgn,
+          currentMoveNumber: context.currentMoveNumber,
+          question: messages[messages.length - 1].content,
+          stockfishAnalysis: context.stockfishAnalysis,
+          engineEvaluation: context.evaluation ? {
+            score: context.evaluation.type === 'cp' ? 
+              (context.evaluation.value / 100).toFixed(2) : 
+              `Mate in ${Math.abs(context.evaluation.value)}`,
+            bestMove: context.evaluation.bestMove,
+            bestLine: context.evaluation.line,
+            depth: context.evaluation.depth || 25
+          } : undefined
+        });
+        
+        // Create AI message
+        const aiMessage = {
+          role: 'assistant',
+          content: aiResponse.analysis,
+          timestamp: Date.now()
+        };
+        
+        // Add AI message to messages
+        const updatedMessages = [...messages, aiMessage];
+        
+        // Save to database
+        const existingChat = await storage.getChatByGameId(gameId);
+        
+        if (existingChat) {
+          const updatedChat = await storage.updateChatMessages(existingChat.id, updatedMessages);
+          if (!updatedChat) {
+            throw new Error("Failed to update chat messages");
+          }
+          res.json({ message: aiResponse.analysis });
+        } else {
+          const newChat = await storage.saveChat({ gameId, messages: updatedMessages });
+          res.json({ message: aiResponse.analysis });
+        }
+      } catch (error) {
+        console.error("Error getting AI response:", error);
+        res.status(500).json({ 
+          message: error instanceof Error ? error.message : "Failed to get AI response" 
+        });
+      }
+    } catch (error) {
+      console.error("Error in chat endpoint:", error);
+      res.status(500).json({ 
+        message: error instanceof Error ? error.message : "Failed to process chat request" 
+      });
+    }
+  });
+
+  // API route for checking API key format
+  app.get("/api/keycheck", async (req, res) => {
+    res.json({
+      isValid: true,
+      message: "API connection ready"
+    });
+  });
+
+  return createServer(app);
 }

@@ -37,6 +37,9 @@ export interface AnalysisRequest {
   currentMoveNumber: number;
   question?: string;
   engineEvaluation?: EngineEvaluation;
+  evaluations?: number[];
+  stockfishAnalysis?: string;
+  detailedEvaluation?: any; // Detailed position metrics from Stockfish
 }
 
 // Types for analysis responses
@@ -59,4 +62,14 @@ export interface GameState {
   metadata: GameMetadata;
   history: ChessMove[];
   currentMoveIndex: number;
+}
+
+// Chess.com game data
+export interface Game {
+  pgn: string;
+  white: string;
+  black: string;
+  result: string;
+  timestamp: number;
+  url?: string;
 }
